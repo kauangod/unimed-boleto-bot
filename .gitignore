@@ -1,0 +1,9 @@
+# Arquivos sensíveis
+.env
+downloads/
+node_modules/
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Logs
+*.log

@@ -1,0 +1,20 @@
+{
+  "name": "unimed-duplicate-invoice",
+  "version": "1.0.0",
+  "description": "Automatically fetches Unimed Ourinhos boleto and sends it via WhatsApp",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "setup-whatsapp": "node src/setup-whatsapp.js",
+    "now": "kill -USR2 $(systemctl show -p MainPID --value unimed-boleto)"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
+    "qrcode-terminal": "^0.12.0",
+    "tough-cookie": "^4.1.4",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}
