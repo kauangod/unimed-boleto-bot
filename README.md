@@ -11,7 +11,7 @@ Busca automaticamente o boleto mensal do plano na Unimed Ourinhos e envia o cód
 3. Um POST em `/portal-pf/boletos/copy-code` com `number=999999` (form-encoded) retorna a linha digitável no campo `message` do JSON
 4. O PDF é baixado via GET em `/portal-pf/boletos/imprimir/999999/0000SEU_CPF`
 5. O **whatsapp-web.js** envia a mensagem com vencimento original, vencimento da 2ª via (data de envio), valor e linha digitável — seguida do PDF em anexo
-6. Um **cron job** dispara automaticamente todo mês (padrão: dia 5 às 08:00, horário de Brasília)
+6. Um **cron job** dispara a cada hora nos dias 5 e 6 de cada mês; ao iniciar o serviço, verifica se hoje é dia 5 ou 6 e envia imediatamente caso ainda não tenha enviado no mês
 
 > **Sobre o vencimento:** o portal não atualiza o vencimento no HTML da listagem quando o pagamento atrasa. Por isso a mensagem mostra o **vencimento original** (extraído da listagem) e o **vencimento da 2ª via** (data em que o boleto foi gerado/enviado).
 
@@ -37,7 +37,7 @@ Edite o arquivo `.env`:
 UNIMED_CPF=000.000.000-00          # Seu CPF (com ou sem pontuação)
 UNIMED_PASSWORD=sua_senha           # Senha do portal Unimed
 WHATSAPP_GROUP_NAME=Nome do Grupo  # Nome EXATO do grupo no WhatsApp
-CRON_SCHEDULE=0 0 8 5 * *         # Dia 5 de cada mês às 08:00
+CRON_SCHEDULE=0 0 * 5,6 * *       # A cada hora nos dias 5 e 6 (dia 6 é fallback)
 DOWNLOAD_DIR=./downloads           # Pasta para salvar o PDF
 ```
 
@@ -68,7 +68,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=SEU_USUARIO
-WorkingDirectory=/home/SEU_USUARIO/Documents/unimed-duplicate-invoice
+WorkingDirectory=/home/SEU_USUARIO/Documents/unimed-boleto-bot
 ExecStart=/usr/bin/node src/index.js
 Restart=on-failure
 RestartSec=30
@@ -84,13 +84,13 @@ sudo systemctl enable unimed-boleto   # ativa no boot
 sudo systemctl start unimed-boleto    # inicia agora
 ```
 
-A partir daí o serviço **inicia automaticamente toda vez que o computador ligar** e aguarda o horário do cron para executar. Você não precisa fazer mais nada.
+A partir daí o serviço **inicia automaticamente toda vez que o computador ligar**. Se ao iniciar o computador for dia 5 ou 6 e o boleto ainda não tiver sido enviado no mês, ele é enviado imediatamente — sem precisar que o computador esteja ligado em um horário específico.
 
 ---
 
 ## ▶️ Execução manual
 
-Para forçar o envio imediato sem esperar o cron (útil para testar ou para quando o mês já começou):
+Para forçar o envio imediato ignorando o controle de mês (útil para testes):
 
 ```bash
 npm run now
@@ -158,7 +158,7 @@ sudo systemctl restart unimed-boleto
 - Configurou e validou o serviço systemd em produção
 
 ```
-unimed-duplicate-invoice/
+unimed-boleto-bot/
 ├── src/
 │   ├── index.js          # Ponto de entrada + agendador cron + listener SIGUSR2
 │   ├── scraper.js        # Scraper HTTP do portal Unimed
