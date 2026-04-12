@@ -71,7 +71,27 @@ const config = {
 };
 
 /**
+ * Reinicializa o cliente WhatsApp (destroy + initialize + waitForReady).
+ * Necessário quando o Puppeteer perde o frame mas o cliente não detecta.
+ */
+async function reinitClient(client) {
+  console.log('[main] Destruindo sessão Puppeteer...');
+  await client.destroy().catch((e) =>
+    console.warn('[main] Erro ao destruir cliente (ignorado):', e.message),
+  );
+  // destroy() não limpa client.info — sem isso, waitForReady retorna
+  // imediatamente achando que o cliente já está pronto
+  client.info = undefined;
+  console.log('[main] Reinicializando cliente WhatsApp...');
+  client.initialize();
+  await waitForReady(client, 120000);
+  console.log('[main] Cliente WhatsApp reconectado com sucesso.');
+}
+
+/**
  * Executa o fluxo completo: scraping → envio WhatsApp.
+ * Se o envio falhar por frame desanexado do Puppeteer, reinicializa o
+ * cliente e tenta novamente (até 2 retentativas).
  */
 let running = false;
 async function run(client, { force = false } = {}) {
@@ -102,13 +122,31 @@ async function run(client, { force = false } = {}) {
       pdfPath: boletoData.pdfPath,
     });
 
-    await sendBoletoToGroup(client, {
+    const sendParams = {
       groupName: config.groupName,
       barcode: boletoData.barcode,
       dueDate: boletoData.dueDate,
       amount: boletoData.amount,
       pdfPath: boletoData.pdfPath,
-    });
+    };
+
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await sendBoletoToGroup(client, sendParams);
+        break;
+      } catch (err) {
+        const isDetachedFrame = err.message && err.message.includes('detached Frame');
+        if (!isDetachedFrame || attempt >= maxRetries) throw err;
+
+        console.warn(
+          `[main] Frame do Puppeteer desanexado (tentativa ${attempt}/${maxRetries}). ` +
+          `Reinicializando cliente WhatsApp...`,
+        );
+        await reinitClient(client);
+      }
+    }
+
     markAsSent();
   } catch (err) {
     console.error('[main] Erro durante a execução:', err.message);
