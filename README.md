@@ -143,6 +143,20 @@ rm .wwebjs_auth/session/SingletonLock .wwebjs_auth/session/SingletonCookie
 sudo systemctl restart unimed-boleto
 ```
 
+### "Could not find Chrome (ver. ...)"
+
+Defina o caminho do Chrome no `.env`:
+
+```env
+CHROME_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+```
+
+Alternativamente, instale o navegador gerenciado pelo Puppeteer:
+
+```bash
+npx puppeteer browsers install chrome
+```
+
 ---
 
 ## 👤 Contribuições

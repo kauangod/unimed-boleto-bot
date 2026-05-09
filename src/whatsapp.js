@@ -1,19 +1,40 @@
 import pkg from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import fs from 'fs';
-import path from 'path';
 
 const { Client, LocalAuth, MessageMedia } = pkg;
+const chromeCandidates = [
+  process.env.CHROME_EXECUTABLE_PATH,
+  process.env.PUPPETEER_EXECUTABLE_PATH,
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/google-chrome',
+  '/usr/bin/chromium-browser',
+  '/usr/bin/chromium',
+];
+
+function resolveChromeExecutablePath() {
+  return chromeCandidates.find((candidate) => candidate && fs.existsSync(candidate));
+}
 
 /**
  * Cria e inicializa o cliente WhatsApp com autenticação persistente.
  * Na primeira execução, exibe o QR code para autenticar.
  */
 export function createClient() {
+  const executablePath = resolveChromeExecutablePath();
+
+  if (!executablePath) {
+    console.warn(
+      '[whatsapp] Chrome/Chromium não encontrado no sistema. ' +
+      'Defina CHROME_EXECUTABLE_PATH ou rode `npx puppeteer browsers install chrome`.',
+    );
+  }
+
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
     puppeteer: {
       headless: true,
+      ...(executablePath ? { executablePath } : {}),
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
