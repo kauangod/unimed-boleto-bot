@@ -107,12 +107,24 @@ export function waitForReady(client, timeoutMs = 60000) {
  * @param {string|null} params.pdfPath - Caminho para o PDF do boleto
  */
 export async function sendBoletoToGroup(client, { groupName, barcode, dueDate, amount, pdfPath }) {
-  // Busca o chat do grupo pelo nome
-  const chats = await client.getChats();
-  const group = chats.find((chat) => chat.isGroup && chat.name === groupName);
+  // Busca o chat do grupo pelo nome.
+  // Workaround: client.getChats() quebra com erro minificado "r: r" desde o update
+  // de jul/2026 do WhatsApp Web (rename id._serialized → id.$1 / chat IDs LID).
+  // Lemos a coleção direto no contexto da página, ignorando chats inválidos.
+  // Ref: https://github.com/wwebjs/whatsapp-web.js/issues/201845
+  const groups = await client.pupPage.evaluate(() => {
+    const chats = window.require('WAWebCollections').Chat.getModelsArray();
+    return chats
+      .filter((c) => c.id && typeof c.id._serialized === 'string' && c.id._serialized.endsWith('@g.us'))
+      .map((c) => ({
+        name: c.name || c.formattedTitle || '',
+        id: c.id._serialized,
+      }));
+  });
+  const group = groups.find((g) => g.name === groupName);
 
   if (!group) {
-    const available = chats.filter((c) => c.isGroup).map((c) => `"${c.name}"`).join(', ');
+    const available = groups.map((g) => `"${g.name}"`).join(', ');
     throw new Error(`Grupo "${groupName}" não encontrado. Grupos disponíveis: ${available}`);
   }
 
@@ -127,13 +139,13 @@ export async function sendBoletoToGroup(client, { groupName, barcode, dueDate, a
     `_Boleto gerado automaticamente pelo sistema._`;
 
   console.log(`[whatsapp] Enviando mensagem para o grupo "${groupName}"...`);
-  await group.sendMessage(message);
+  await client.sendMessage(group.id, message);
 
   // Envia o PDF como anexo, se disponível
   if (pdfPath && fs.existsSync(pdfPath)) {
     console.log('[whatsapp] Enviando PDF do boleto...');
     const media = MessageMedia.fromFilePath(pdfPath);
-    await group.sendMessage(media, { caption: '📄 Boleto Unimed Ourinhos (PDF)' });
+    await client.sendMessage(group.id, media, { caption: '📄 Boleto Unimed Ourinhos (PDF)' });
   } else if (pdfPath) {
     console.warn(`[whatsapp] PDF não encontrado em: ${pdfPath}`);
   }

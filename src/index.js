@@ -149,7 +149,7 @@ async function run(client, { force = false } = {}) {
 
     markAsSent();
   } catch (err) {
-    console.error('[main] Erro durante a execução:', err.message);
+    console.error('[main] Erro durante a execução:', err);
   } finally {
     running = false;
   }
