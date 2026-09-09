@@ -32,10 +32,17 @@ function alreadySentThisMonth() {
   return getSentMonth() === key;
 }
 
-// Retorna true se hoje é dia 5 ou dia 6 (fallback caso o processo não estava rodando no dia 5)
+// Janela de envio: dias do mês em que o boleto pode ser enviado (5 = principal,
+// 6 e 7 = fallback). O heartbeat abaixo re-checa a condição várias vezes ao dia,
+// então funciona mesmo se o computador estava suspenso no horário exato.
+const sendDays = (process.env.SEND_DAYS || '5,6,7')
+  .split(',')
+  .map((d) => parseInt(d.trim(), 10))
+  .filter((d) => Number.isInteger(d) && d >= 1 && d <= 31);
+
+// Retorna true se hoje está dentro da janela de envio
 function isSendDay() {
-  const day = new Date().getDate();
-  return day === 5 || day === 6;
+  return sendDays.includes(new Date().getDate());
 }
 
 // Remove arquivos de lock do Chromium que ficam presos quando o processo é encerrado abruptamente
@@ -66,8 +73,11 @@ const config = {
   password: process.env.UNIMED_PASSWORD,
   groupName: process.env.WHATSAPP_GROUP_NAME,
   downloadDir: path.resolve(process.env.DOWNLOAD_DIR || './downloads'),
-  // Roda a cada hora nos dias 5 e 6; o controle de mês evita envios duplicados
-  cronSchedule: process.env.CRON_SCHEDULE || '0 0 * 5,6 * *',
+  // Heartbeat frequente em vez de cron de horário fixo: o node-cron perde
+  // disparos que caem enquanto o sistema está suspenso (hrtime congela e o
+  // scheduler não recupera o momento perdido). Com checagem a cada 20 min,
+  // basta o computador acordar uma vez na janela de envio para o boleto sair.
+  heartbeatSchedule: process.env.HEARTBEAT_SCHEDULE || '*/20 * * * *',
 };
 
 /**
@@ -83,7 +93,26 @@ async function reinitClient(client) {
   // imediatamente achando que o cliente já está pronto
   client.info = undefined;
   console.log('[main] Reinicializando cliente WhatsApp...');
-  client.initialize();
+  try {
+    await client.initialize();
+  } catch (err) {
+    // destroy() às vezes não encerra o Chrome a tempo, e o Puppeteer recusa
+    // subir de novo sobre o mesmo userDataDir ("browser is already running").
+    // Nesse caso, matamos os processos Chrome órfãos da sessão e tentamos mais uma vez.
+    if (err.message && err.message.includes('already running')) {
+      console.warn('[main] Chrome órfão segurando a sessão. Encerrando e tentando de novo...');
+      const { execSync } = await import('child_process');
+      try {
+        execSync("pkill -f '.wwebjs_auth/session' || true");
+        await new Promise((r) => setTimeout(r, 3000));
+      } catch {
+        // pkill sem match não é problema
+      }
+      await client.initialize();
+    } else {
+      throw err;
+    }
+  }
   await waitForReady(client, 120000);
   console.log('[main] Cliente WhatsApp reconectado com sucesso.');
 }
@@ -161,7 +190,10 @@ async function main() {
   console.log('[main] Inicializando WhatsApp...');
   client.initialize();
 
-  await waitForReady(client, 120000);
+  // 15 min: após encerramentos abruptos repetidos, a sincronização de mensagens
+  // do WhatsApp Web recomeça do zero a cada kill — matar cedo demais cria um
+  // loop em que o sync nunca completa (página fica em ~99% para sempre).
+  await waitForReady(client, 900000);
 
   // Dispara execução imediata ao receber SIGUSR2 (usado pelo script "npm run now")
   process.on('SIGUSR2', () => {
@@ -169,17 +201,25 @@ async function main() {
     run(client, { force: true });
   });
 
-  // Verifica ao iniciar: se hoje é dia 5 ou 6 e ainda não enviou este mês, envia agora
+  // Verifica ao iniciar: se hoje está na janela de envio e ainda não enviou este mês, envia agora
   if (isSendDay() && !alreadySentThisMonth()) {
-    console.log(`[main] Hoje é dia ${new Date().getDate()} e o boleto ainda não foi enviado este mês. Executando agora...`);
+    console.log(`[main] Hoje é dia ${new Date().getDate()} (janela de envio) e o boleto ainda não foi enviado este mês. Executando agora...`);
     run(client);
   }
 
-  console.log(`\n[main] Agendado para: ${config.cronSchedule}`);
+  console.log(`\n[main] Heartbeat agendado para: ${config.heartbeatSchedule}`);
+  console.log(`[main] Janela de envio: dias ${sendDays.join(', ')}`);
   console.log(`[main] PID do processo: ${process.pid}`);
   console.log('[main] Aguardando próxima execução...\n');
 
-  cron.schedule(config.cronSchedule, () => run(client), {
+  // Heartbeat: a cada ciclo, checa se está na janela de envio com boleto pendente.
+  // O controle via .sent_flag evita duplicados; o `running` evita sobreposição.
+  cron.schedule(config.heartbeatSchedule, () => {
+    if (isSendDay() && !alreadySentThisMonth()) {
+      console.log('[main] Heartbeat: dentro da janela de envio e boleto pendente. Executando...');
+      run(client);
+    }
+  }, {
     timezone: 'America/Sao_Paulo',
   });
 }

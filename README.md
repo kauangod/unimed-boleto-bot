@@ -11,7 +11,7 @@ Busca automaticamente o boleto mensal do plano na Unimed Ourinhos e envia o cód
 3. Um POST em `/portal-pf/boletos/copy-code` com `number=999999` (form-encoded) retorna a linha digitável no campo `message` do JSON
 4. O PDF é baixado via GET em `/portal-pf/boletos/imprimir/999999/0000SEU_CPF`
 5. O **whatsapp-web.js** envia a mensagem com vencimento original, vencimento da 2ª via (data de envio), valor e linha digitável — seguida do PDF em anexo
-6. Um **cron job** dispara a cada hora nos dias 5 e 6 de cada mês; ao iniciar o serviço, verifica se hoje é dia 5 ou 6 e envia imediatamente caso ainda não tenha enviado no mês
+6. Um **heartbeat** roda a cada 20 min: se hoje está na janela de envio (dias 5-7 do mês, configurável via `SEND_DAYS`) e o boleto ainda não foi enviado no mês, o envio acontece. Isso é imune a suspend — se o computador estava dormindo às 08:00 do dia 5, basta acordar em qualquer momento da janela para o boleto sair. Ao iniciar o serviço, a mesma checagem roda imediatamente.
 
 > **Sobre o vencimento:** o portal não atualiza o vencimento no HTML da listagem quando o pagamento atrasa. Por isso a mensagem mostra o **vencimento original** (extraído da listagem) e o **vencimento da 2ª via** (data em que o boleto foi gerado/enviado).
 
@@ -37,7 +37,7 @@ Edite o arquivo `.env`:
 UNIMED_CPF=000.000.000-00          # Seu CPF (com ou sem pontuação)
 UNIMED_PASSWORD=sua_senha           # Senha do portal Unimed
 WHATSAPP_GROUP_NAME=Nome do Grupo  # Nome EXATO do grupo no WhatsApp
-CRON_SCHEDULE=0 0 * 5,6 * *       # A cada hora nos dias 5 e 6 (dia 6 é fallback)
+SEND_DAYS=5,6,7                    # Dias do mês para envio (5=principal, 6-7=fallback)
 DOWNLOAD_DIR=./downloads           # Pasta para salvar o PDF
 ```
 
@@ -84,7 +84,9 @@ sudo systemctl enable unimed-boleto   # ativa no boot
 sudo systemctl start unimed-boleto    # inicia agora
 ```
 
-A partir daí o serviço **inicia automaticamente toda vez que o computador ligar**. Se ao iniciar o computador for dia 5 ou 6 e o boleto ainda não tiver sido enviado no mês, ele é enviado imediatamente — sem precisar que o computador esteja ligado em um horário específico.
+A partir daí o serviço **inicia automaticamente toda vez que o computador ligar**. Se ao iniciar (ou em qualquer heartbeat) estiver dentro da janela de envio (dias 5-7) e o boleto ainda não tiver sido enviado no mês, ele é enviado imediatamente — sem precisar que o computador esteja ligado em um horário específico.
+
+> ℹ️ **Por que heartbeat e não cron de horário fixo:** o `node-cron` perde disparos que caem enquanto o sistema está suspenso (o relógio monotônico congela e o scheduler não recupera o momento perdido). Foi exatamente assim que o envio do dia 05/09 falhou: o notebook dormiu de 01:51 às 12:00 e o gatilho das 08:00 nunca executou. Com checagem a cada 20 min na janela inteira de dias, qualquer período acordado de 20 min garante o envio.
 
 ---
 

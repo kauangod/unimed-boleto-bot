@@ -16,6 +16,14 @@ function resolveChromeExecutablePath() {
   return chromeCandidates.find((candidate) => candidate && fs.existsSync(candidate));
 }
 
+// Pin da versão do WhatsApp Web: builds novas (ex.: 2.3000.1047086005, set/2026)
+// travam no restore de sessão — autenticam mas nunca chegam ao estado 'ready'.
+// Bug conhecido do wwebjs, sem fix oficial até o momento.
+// Ref: https://github.com/wwebjs/whatsapp-web.js/issues/127084
+// A build abaixo é a última conhecida como funcional (24/08–09/09) e já está
+// cacheada em ./.wwebjs_cache — nenhum download é necessário.
+const WEB_VERSION = process.env.WEB_VERSION || '2.3000.1045862343';
+
 /**
  * Cria e inicializa o cliente WhatsApp com autenticação persistente.
  * Na primeira execução, exibe o QR code para autenticar.
@@ -32,6 +40,8 @@ export function createClient() {
 
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
+    webVersion: WEB_VERSION,
+    webVersionCache: { type: 'local', path: './.wwebjs_cache' },
     puppeteer: {
       headless: true,
       ...(executablePath ? { executablePath } : {}),
