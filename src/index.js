@@ -118,9 +118,9 @@ async function reinitClient(client) {
 }
 
 /**
- * Executa o fluxo completo: scraping → envio WhatsApp.
- * Se o envio falhar por frame desanexado do Puppeteer, reinicializa o
- * cliente e tenta novamente (até 2 retentativas).
+ * Executa o fluxo completo: scraping → envio WhatsApp (somente mensagem com
+ * a linha digitável). Se o cliente Puppeteer travar (frame desanexado ou
+ * evaluate pendurado), reinicializa o cliente e tenta novamente (até 3 vezes).
  */
 let running = false;
 async function run(client, { force = false } = {}) {
@@ -148,7 +148,6 @@ async function run(client, { force = false } = {}) {
       barcode: boletoData.barcode,
       dueDate: boletoData.dueDate,
       amount: boletoData.amount,
-      pdfPath: boletoData.pdfPath,
     });
 
     const sendParams = {
@@ -156,7 +155,6 @@ async function run(client, { force = false } = {}) {
       barcode: boletoData.barcode,
       dueDate: boletoData.dueDate,
       amount: boletoData.amount,
-      pdfPath: boletoData.pdfPath,
     };
 
     const maxRetries = 3;
@@ -165,11 +163,31 @@ async function run(client, { force = false } = {}) {
         await sendBoletoToGroup(client, sendParams);
         break;
       } catch (err) {
+        // Timeout/ProtocolError: o evaluate do Puppeteer travou — o browser pode
+        // estar congelado (acontece após dias de sessão aberta) ou o frame
+        // desanexou. Reinicializa o cliente e tenta de novo.
         const isDetachedFrame = err.message && err.message.includes('detached Frame');
-        if (!isDetachedFrame || attempt >= maxRetries) throw err;
+        const isProtocolHang =
+          err.message && /timed out|ProtocolError|Target closed/i.test(err.message);
+        if ((!isDetachedFrame && !isProtocolHang) || attempt >= maxRetries) {
+          // Enviado pode ter sido entregue mesmo com erro de timeout: o
+          // sendMessage pode travar no Node DEPOIS de a mensagem sair no
+          // browser. Nesse caso marca como enviado para não duplicar a cada
+          // heartbeat (foi assim que o grupo recebeu spam a cada 20 min).
+          if (err.sendAttempted) {
+            console.error(
+              '[main] Envio falhou com timeout DEPOIS de iniciar o sendMessage. ' +
+              'A mensagem pode ter sido entregue — marcando o mês como enviado ' +
+              'para evitar duplicação. Verifique o grupo; para reenviar force ' +
+              'com `npm run now`.',
+            );
+            markAsSent();
+          }
+          throw err;
+        }
 
         console.warn(
-          `[main] Frame do Puppeteer desanexado (tentativa ${attempt}/${maxRetries}). ` +
+          `[main] Cliente WhatsApp travado/desanexado (tentativa ${attempt}/${maxRetries}). ` +
           `Reinicializando cliente WhatsApp...`,
         );
         await reinitClient(client);

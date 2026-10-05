@@ -2,7 +2,7 @@ import pkg from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import fs from 'fs';
 
-const { Client, LocalAuth, MessageMedia } = pkg;
+const { Client, LocalAuth } = pkg;
 const chromeCandidates = [
   process.env.CHROME_EXECUTABLE_PATH,
   process.env.PUPPETEER_EXECUTABLE_PATH,
@@ -108,15 +108,19 @@ export function waitForReady(client, timeoutMs = 60000) {
 
 /**
  * Envia o boleto para um grupo do WhatsApp.
+ *
+ * Erros lançados AQUI depois do lookup do grupo recebem `sendAttempted = true`
+ * quando o envio pode ter sido entregue mesmo com erro (timeout do protocolo):
+ * o evaluate pode travar no Node depois de a mensagem já ter saído no browser.
+ *
  * @param {import('whatsapp-web.js').Client} client
  * @param {object} params
  * @param {string} params.groupName - Nome exato do grupo
  * @param {string} params.barcode - Linha digitável
  * @param {string} params.dueDate - Data de vencimento
  * @param {string} params.amount - Valor
- * @param {string|null} params.pdfPath - Caminho para o PDF do boleto
  */
-export async function sendBoletoToGroup(client, { groupName, barcode, dueDate, amount, pdfPath }) {
+export async function sendBoletoToGroup(client, { groupName, barcode, dueDate, amount }) {
   // Busca o chat do grupo pelo nome.
   // Workaround: client.getChats() quebra com erro minificado "r: r" desde o update
   // de jul/2026 do WhatsApp Web (rename id._serialized → id.$1 / chat IDs LID).
@@ -149,15 +153,16 @@ export async function sendBoletoToGroup(client, { groupName, barcode, dueDate, a
     `_Boleto gerado automaticamente pelo sistema._`;
 
   console.log(`[whatsapp] Enviando mensagem para o grupo "${groupName}"...`);
-  await client.sendMessage(group.id, message);
-
-  // Envia o PDF como anexo, se disponível
-  if (pdfPath && fs.existsSync(pdfPath)) {
-    console.log('[whatsapp] Enviando PDF do boleto...');
-    const media = MessageMedia.fromFilePath(pdfPath);
-    await client.sendMessage(group.id, media, { caption: '📄 Boleto Unimed Ourinhos (PDF)' });
-  } else if (pdfPath) {
-    console.warn(`[whatsapp] PDF não encontrado em: ${pdfPath}`);
+  try {
+    await client.sendMessage(group.id, message);
+  } catch (err) {
+    // Timeout do protocolo do Puppeteer: a mensagem pode ter sido entregue no
+    // browser mesmo com o evaluate travando no Node. Marca como "tentativa de
+    // envio feita" para o chamador decidir (evita duplicar mensagem em retry).
+    if (err.message && /timed out|ProtocolError|Target closed/i.test(err.message)) {
+      err.sendAttempted = true;
+    }
+    throw err;
   }
 
   console.log('[whatsapp] Mensagem enviada com sucesso!');

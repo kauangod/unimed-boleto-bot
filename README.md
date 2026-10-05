@@ -1,6 +1,6 @@
 # 🏥 Automação de 2ª Via de Boleto - Unimed Ourinhos
 
-Busca automaticamente o boleto mensal do plano na Unimed Ourinhos e envia o código de barras, vencimento, valor e o PDF para um grupo do WhatsApp.
+Busca automaticamente o boleto mensal do plano na Unimed Ourinhos e envia o código de barras, vencimento e valor para um grupo do WhatsApp.
 
 ---
 
@@ -10,7 +10,7 @@ Busca automaticamente o boleto mensal do plano na Unimed Ourinhos e envia o cód
 2. Um GET em `/portal-pf/boletos` retorna o HTML da lista, que o **cheerio** analisa para encontrar o número do boleto (ex.: `999999`) no padrão `<a href="boletos/billet/999999">`
 3. Um POST em `/portal-pf/boletos/copy-code` com `number=999999` (form-encoded) retorna a linha digitável no campo `message` do JSON
 4. O PDF é baixado via GET em `/portal-pf/boletos/imprimir/999999/0000SEU_CPF`
-5. O **whatsapp-web.js** envia a mensagem com vencimento original, vencimento da 2ª via (data de envio), valor e linha digitável — seguida do PDF em anexo
+5. O **whatsapp-web.js** envia a mensagem com vencimento original, vencimento da 2ª via (data de envio), valor e linha digitável (o envio do PDF em anexo foi removido — travava o cliente Puppeteer)
 6. Um **heartbeat** roda a cada 20 min: se hoje está na janela de envio (dias 5-7 do mês, configurável via `SEND_DAYS`) e o boleto ainda não foi enviado no mês, o envio acontece. Isso é imune a suspend — se o computador estava dormindo às 08:00 do dia 5, basta acordar em qualquer momento da janela para o boleto sair. Ao iniciar o serviço, a mesma checagem roda imediatamente.
 
 > **Sobre o vencimento:** o portal não atualiza o vencimento no HTML da listagem quando o pagamento atrasa. Por isso a mensagem mostra o **vencimento original** (extraído da listagem) e o **vencimento da 2ª via** (data em que o boleto foi gerado/enviado).

@@ -28,14 +28,14 @@ async function fetchWithCookies(jar, url, options = {}) {
 
 /**
  * Faz login no portal Unimed Ourinhos, busca o boleto mais recente,
- * obtém o código de barras via /boletos/copy-code e baixa o PDF via
- * /boletos/imprimir/:numero/:cpf.
+ * obtém o código de barras via /boletos/copy-code e atualiza vencimento
+ * e valor da 2ª via via /boletos/imprimir/:numero/:cpf (quando retorna HTML).
  *
  * @param {object} config
  * @param {string} config.cpf
  * @param {string} config.password
  * @param {string} config.downloadDir
- * @returns {Promise<{barcode: string, dueDate: string, amount: string, pdfPath: string|null}>}
+ * @returns {Promise<{barcode: string, dueDate: string, amount: string}>}
  */
 export async function fetchBoleto({ cpf, password, downloadDir }) {
   fs.mkdirSync(downloadDir, { recursive: true });
@@ -162,13 +162,12 @@ export async function fetchBoleto({ cpf, password, downloadDir }) {
   console.log(`[scraper] Código de barras: ${barcode}`);
 
   // ── 5. Busca HTML do boleto para extrair vencimento e valor atualizados ────────
-  // O endpoint /imprimir retorna HTML com os dados da 2ª via (com juros se atrasado)
+  // O endpoint /imprimir retorna HTML com os dados da 2ª via (com juros se atrasado).
+  // O download do PDF foi removido: o envio no WhatsApp é somente da linha digitável.
   const boletoUrl = `${BASE}/boletos/imprimir/${boletoNumber}/0000${cpfClean}`;
   console.log(`[scraper] Buscando dados atualizados do boleto: ${boletoUrl}`);
 
   const boletoRes = await fetchWithCookies(jar, boletoUrl);
-
-  let pdfPath = null;
 
   if (boletoRes.ok) {
     const contentType = boletoRes.headers.get('content-type') ?? '';
@@ -193,32 +192,15 @@ export async function fetchBoleto({ cpf, password, downloadDir }) {
       });
 
       console.log(`[scraper] Dados atualizados — Vencimento: ${dueDate} | Valor: ${amount}`);
-
-      // Se o HTML contiver um link para o PDF, baixa o arquivo
-      const $boletoPage = cheerio.load(boletoHtml);
-      const pdfLink = $boletoPage('a[href$=".pdf"], a[href*="download"]').first().attr('href');
-      if (pdfLink) {
-        const fullPdfUrl = pdfLink.startsWith('http') ? pdfLink : `${BASE}/${pdfLink.replace(/^\//, '')}`;
-        const pdfRes = await fetchWithCookies(jar, fullPdfUrl);
-        if (pdfRes.ok) {
-          const filename = `boleto-unimed-${new Date().toISOString().slice(0, 10)}.pdf`;
-          pdfPath = path.join(downloadDir, filename);
-          fs.writeFileSync(pdfPath, Buffer.from(await pdfRes.arrayBuffer()));
-          console.log(`[scraper] PDF salvo em: ${pdfPath}`);
-        }
-      }
     } else {
-      // O endpoint retornou o PDF diretamente
-      const filename = `boleto-unimed-${new Date().toISOString().slice(0, 10)}.pdf`;
-      pdfPath = path.join(downloadDir, filename);
-      fs.writeFileSync(pdfPath, Buffer.from(await boletoRes.arrayBuffer()));
-      console.log(`[scraper] PDF salvo em: ${pdfPath}`);
+      // Endpoint devolveu o PDF direto — não baixamos mais, só liberamos o corpo
+      await boletoRes.body?.cancel().catch(() => {});
     }
   } else {
     console.warn(`[scraper] Falha ao acessar endpoint do boleto: HTTP ${boletoRes.status}`);
   }
 
-  return { barcode, dueDate, amount, pdfPath };
+  return { barcode, dueDate, amount };
 }
 
 
